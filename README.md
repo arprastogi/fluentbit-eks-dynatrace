@@ -485,3 +485,153 @@ AWS EKS Cluster
 - Or should I help you with setting up **AWS CloudWatch as a fallback in case Dynatrace endpoint is down**?
 
 Let me know how you'd like to proceed! 😊
+------------------------------------------------------------------------------------------------------------------------------
+
+### ✅ **Step 4: Segregate Logs Based on Microservices and Forward to the Same Dynatrace Environment**
+
+---
+
+## 🎯 **Approach:**
+We'll use **Fluent Bit's `Match` and `Tag` filtering mechanism** to segregate logs based on different microservices (e.g., `auth-service`, `payments-service`, `orders-service`) and forward them to Dynatrace in a structured format.
+
+---
+
+## **Step 1: Update Fluent Bit ConfigMap (`fluent-bit-config.yaml`)**
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: fluent-bit
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        5
+        Log_Level    info
+        Parsers_File parsers.conf
+
+    # Input to collect all logs from EKS pods
+    [INPUT]
+        Name         tail
+        Path         /var/log/containers/*.log
+        Parser       docker
+        Tag          kube.*
+        Mem_Buf_Limit 5MB
+        Skip_Long_Lines On
+
+    # Kubernetes metadata enrichment
+    [FILTER]
+        Name         kubernetes
+        Match        kube.*
+        Kube_URL     https://kubernetes.default.svc.cluster.local
+        Merge_Log    On
+        K8S-Logging.Exclude Off
+        K8S-Logging.Parser On
+
+    # Filter for auth-service logs
+    [FILTER]
+        Name         grep
+        Match        kube.*
+        Regex        kubernetes['labels']['app'] auth-service
+
+    [OUTPUT]
+        Name         http
+        Match        kube.*
+        Host         <DYNATRACE_ENDPOINT>
+        Port         443
+        URI          /api/v2/logs/ingest
+        Format       json
+        tls          On
+        Header       Content-Type application/json
+        Header       Authorization "Api-Token <DYNATRACE_API_TOKEN>"
+        Json_Key     service_name
+        Json_Value   auth-service
+
+    # Filter for payments-service logs
+    [FILTER]
+        Name         grep
+        Match        kube.*
+        Regex        kubernetes['labels']['app'] payments-service
+
+    [OUTPUT]
+        Name         http
+        Match        kube.*
+        Host         <DYNATRACE_ENDPOINT>
+        Port         443
+        URI          /api/v2/logs/ingest
+        Format       json
+        tls          On
+        Header       Content-Type application/json
+        Header       Authorization "Api-Token <DYNATRACE_API_TOKEN>"
+        Json_Key     service_name
+        Json_Value   payments-service
+
+    # Filter for orders-service logs
+    [FILTER]
+        Name         grep
+        Match        kube.*
+        Regex        kubernetes['labels']['app'] orders-service
+
+    [OUTPUT]
+        Name         http
+        Match        kube.*
+        Host         <DYNATRACE_ENDPOINT>
+        Port         443
+        URI          /api/v2/logs/ingest
+        Format       json
+        tls          On
+        Header       Content-Type application/json
+        Header       Authorization "Api-Token <DYNATRACE_API_TOKEN>"
+        Json_Key     service_name
+        Json_Value   orders-service
+```
+
+---
+
+### ✅ **Explanation:**
+| Microservice       | Fluent Bit Filter              | Output to Dynatrace |
+|----------------|---------------------------------|--------------------|
+| `auth-service`   | Filter based on app label   | Sends logs with `service_name: auth-service` |
+| `payments-service` | Filter based on app label   | Sends logs with `service_name: payments-service` |
+| `orders-service`  | Filter based on app label   | Sends logs with `service_name: orders-service` |
+
+---
+
+### **Step 2: Apply Updated Fluent Bit ConfigMap**
+```bash
+kubectl apply -f fluent-bit-config.yaml
+```
+
+---
+
+### **Step 3: Restart Fluent Bit DaemonSet**
+```bash
+kubectl rollout restart daemonset fluent-bit -n fluent-bit
+```
+
+---
+
+## ✅ **Logs Segregated Successfully in Dynatrace! 🎯**
+In Dynatrace:
+
+| Service Name      | Logs Visible in Dynatrace |
+|----------------|----------------------------|
+| auth-service         | ✅ |
+| payments-service | ✅ |
+| orders-service     | ✅ |
+
+---
+
+## 🎯 **Optional Enhancements:**
+| Feature              | Fluent Bit Plugin |
+|-----------------|---------------------------|
+| Add Custom Tags    | `record_modifier` |
+| Filter Specific Pod Names  | `grep` |
+| Throttle Specific Microservice Logs | `throttle` |
+| Add Environment Info (e.g., `dev`, `staging`, `prod`) | `record_modifier` |
+
+---
+
+## 🚀 **Next Step**
+Would you like me to now show **Fluent Bit Helm Chart Deployment for Production-Ready Setup with Best Practices?**
